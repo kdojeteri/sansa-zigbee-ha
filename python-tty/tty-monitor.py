@@ -3,7 +3,7 @@ import argparse
 from queue import Queue
 from sys import stdout
 
-from .tools import SerialCapture, Frame
+from tools import SerialCapture, Frame
 
 binary_translation = str.maketrans("01", "·■")
 
