@@ -35,6 +35,7 @@ class SerialCapture:
             self.serial_port = f
             self.total_frame_count = 0
             self._thread = Thread(target=self._read_frames, args=(f,))
+            self._thread.start()
 
     def close(self):
         if self.serial_port is not None:
