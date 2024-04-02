@@ -1,2 +1,2 @@
-from .serial_capture import SerialCapture, Frame, DEFAULT_RECENTS_LIFETIME, EndOfFile
-from .write import serial_forward_frame
+from .serial_capture import SerialCapture, Message, DEFAULT_RECENTS_LIFETIME
+from .write import buffer_from_message

@@ -1,32 +1,44 @@
-from time import time
-from collections import deque, namedtuple
+import enum
+from collections import namedtuple
 from queue import Queue
-from serial import Serial
 from threading import Thread
+from time import time
+from typing import Callable
 
+from serial import Serial
+from serial.serialutil import SerialException
 
 DEFAULT_RECENTS_LIFETIME = 3.0
 
-Frame = namedtuple('Frame', ['ts', 'serial_name', 'message'])
-EndOfFile = namedtuple('EndOfFile', ['total_frame_count', 'serial_name'])
+Message = namedtuple('Message', ['ts', 'serial_name', 'message'])
+
+# TODO send reason for end of capture
+EndOfCapture = namedtuple('EndOfCapture', ['code'])
+EndCode = enum.Enum('EndCode', ['CLOSED', 'DISCONNECTED'])
+
+# TODO unpack frame using struct
+frame_format = '<BpB'
+Frame = namedtuple("Frame", ['preamble', 'message', 'checksum'])
 
 
-class SerialCapture:
-    def __init__(self, serial_name: str, msg_queue: Queue, recents_lifetime=DEFAULT_RECENTS_LIFETIME):
+class SerialCapture(Thread):
+    def __init__(self,
+                 serial_name: str,
+                 msg_queue: Queue,
+                 unknown_callback: Callable[[bytes], None] | None = None,
+                 start_timestamp=None,
+                 recents_lifetime=DEFAULT_RECENTS_LIFETIME):
+        Thread.__init__(self)
+        self.unknown_callback = unknown_callback
         self.total_frame_count: int = 0
         self.serial_port: Serial | None = None
-        self._thread: Thread | None = None
-        self.start_timestamp: float | None = None
-        self.recent_frames: deque[Frame] = deque()
+        self.start_timestamp: float | None = start_timestamp
+        self.recent_messages: set = set()
         self.serial_name = serial_name
         self.msg_queue = msg_queue
         self.recents_lifetime = recents_lifetime
 
-    def start(self, start_timestamp: float = None):
-        # if arg is set, set member property
-        if start_timestamp is not None:
-            self.start_timestamp = start_timestamp
-
+    def run(self):
         # if member property not set, default to current time
         if self.start_timestamp is None:
             self.start_timestamp = time()
@@ -34,43 +46,63 @@ class SerialCapture:
         with Serial(self.serial_name) as f:
             self.serial_port = f
             self.total_frame_count = 0
-            self._thread = Thread(target=self._read_frames, args=(f,))
-            self._thread.start()
+
+            try:
+                while f.is_open and (byte := f.read(1)):
+                    self._invalidate_recents()
+
+                    if byte == b'\x55':
+                        # new frame start
+                        self._process_message()
+                    elif self.unknown_callback is not None:
+                        self.unknown_callback(byte)
+            except TypeError:
+                if not self.serial_port.is_open:
+                    # TODO report serial port was closed
+                    return
+            except SerialException:
+                # TODO report serial port was disconnected
+                return
+            except BaseException:
+                raise
 
     def close(self):
         if self.serial_port is not None:
             self.serial_port.close()
-        if self._thread is not None:
-            self._thread.join()
-
-    def _read_frames(self, f: Serial):
-        while byte := f.read(1):
-            self._invalidate_recents()
-
-            if byte == b'\x55':
-                # new frame start
-                self.total_frame_count += 1
-                frame_length = f.read(1)[0]
-                message = f.read(frame_length)
-                cc = f.read(1)[0]
-                checksum = sum(message).to_bytes(2, byteorder='little')[0]
-
-                if cc != checksum:
-                    raise ValueError("checksum invalid")
-
-                if message in self.recent_frames:
-                    continue
-
-                frame = Frame(
-                    time() - self.start_timestamp,
-                    self.serial_name,
-                    message
-                )
-
-                self.recent_frames.append(frame)
-                self.msg_queue.put(frame)
+            self.serial_port = None
+        self.join()
 
     def _invalidate_recents(self):
-        while len(self.recent_frames) and self.recent_frames[0].ts + self.recents_lifetime + self.start_timestamp < time():
-            self.recent_frames.popleft()
+        expired = (
+            message
+            for message in self.recent_messages if
+            (expires_at := message.ts + self.recents_lifetime + self.start_timestamp)
+            and time() > expires_at
+        )
 
+        self.recent_messages.difference_update(expired)
+
+    def _process_message(self):
+        frame_length = self.serial_port.read(1)[0]
+        message = self.serial_port.read(frame_length)
+        cc = self.serial_port.read(1)[0]
+
+        checksum = sum(message).to_bytes(2, byteorder='little')[0]
+
+        if cc != checksum and self.unknown_callback is not None:
+            self.unknown_callback(bytes((frame_length, *message, cc)))
+            return
+
+        self.total_frame_count += 1
+
+        if message in (f.message for f in self.recent_messages):
+            return
+
+        frame = Message(
+            time() - self.start_timestamp,
+            self.serial_name,
+            message
+        )
+
+        self.recent_messages.append(frame)
+        self.msg_queue.put(frame)
