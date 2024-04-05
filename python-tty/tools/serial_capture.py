@@ -56,8 +56,11 @@ class SerialCapture(Thread):
                         self._process_message()
                     elif self.unknown_callback is not None:
                         self.unknown_callback(byte)
+            except OSError:
+                # TODO can't open serial port
+                return
             except TypeError:
-                if not self.serial_port.is_open:
+                if not f.is_open:
                     # TODO report serial port was closed
                     return
             except SerialException:
@@ -75,7 +78,7 @@ class SerialCapture(Thread):
     def _invalidate_recents(self):
         expired = (
             message
-            for message in self.recent_messages if
+            for message in self.recent_messages.copy() if
             (expires_at := message.ts + self.recents_lifetime + self.start_timestamp)
             and time() > expires_at
         )
@@ -104,5 +107,5 @@ class SerialCapture(Thread):
             message
         )
 
-        self.recent_messages.append(frame)
+        self.recent_messages.add(frame)
         self.msg_queue.put(frame)

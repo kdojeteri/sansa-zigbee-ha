@@ -1,0 +1,11 @@
+{
+    "nrf-connect.toolchain.path": "${nrf-connect.toolchain:2.6.0}",
+    "files.associations": {
+        "irq.h": "c",
+        "log.h": "c",
+        "log_instance.h": "c",
+        "log_core.h": "c",
+        "log_msg.h": "c",
+        "compare": "c"
+    }
+}
