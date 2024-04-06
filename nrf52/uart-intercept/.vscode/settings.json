@@ -6,6 +6,11 @@
         "log_instance.h": "c",
         "log_core.h": "c",
         "log_msg.h": "c",
-        "compare": "c"
-    }
+        "compare": "c",
+        "nrfx_timer.h": "c",
+        "gpio.h": "c",
+        "kernel.h": "c",
+        "types.h": "c"
+    },
+    "git.autoRepositoryDetection": false
 }
